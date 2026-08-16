@@ -3,15 +3,15 @@ import json
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
 
 # Define paths relative to project root
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 MODELS_DIR = os.path.join(BASE_DIR, "models")
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.impute import SimpleImputer
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
 
 def main():
     print("=========================================")
@@ -19,8 +19,8 @@ def main():
     print("=========================================")
     
     # Load partition data
-    train_path = os.path.join(DATA_DIR, "titanic_train.csv")
-    test_path = os.path.join(DATA_DIR, "titanic_test.csv")
+    train_path = os.path.join(DATA_DIR, "churn_train.csv")
+    test_path = os.path.join(DATA_DIR, "churn_test.csv")
     try:
         train_df = pd.read_csv(train_path)
         test_df = pd.read_csv(test_path)
@@ -29,15 +29,24 @@ def main():
         return
 
     # Separate target
-    target = 'survived'
+    target = 'Churn'
     X_train = train_df.drop(columns=[target])
     y_train = train_df[target]
     X_test = test_df.drop(columns=[target])
     y_test = test_df[target]
 
+    # Convert Area code to string to ensure categorical treatment
+    X_train['Area code'] = X_train['Area code'].astype(str)
+    X_test['Area code'] = X_test['Area code'].astype(str)
+
     # Define columns
-    num_cols = [col for col in ['age', 'fare', 'sibsp', 'parch'] if col in X_train.columns]
-    cat_cols = [col for col in ['sex', 'embarked', 'pclass'] if col in X_train.columns]
+    num_cols = [
+        'Account length', 'Number vmail messages', 'Total day minutes', 'Total day calls',
+        'Total day charge', 'Total eve minutes', 'Total eve calls', 'Total eve charge',
+        'Total night minutes', 'Total night calls', 'Total night charge', 'Total intl minutes',
+        'Total intl calls', 'Total intl charge', 'Customer service calls'
+    ]
+    cat_cols = ['State', 'Area code', 'International plan', 'Voice mail plan']
 
     print(f"Numerical features: {num_cols}")
     print(f"Categorical features: {cat_cols}")

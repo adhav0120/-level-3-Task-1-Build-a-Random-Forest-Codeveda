@@ -73,8 +73,8 @@ def main():
     sns.set_theme(style="whitegrid")
     plt.figure(figsize=(6, 5))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Greens', cbar=False,
-                xticklabels=['Not Survived', 'Survived'],
-                yticklabels=['Not Survived', 'Survived'])
+                xticklabels=['Non-Churn', 'Churn'],
+                yticklabels=['Non-Churn', 'Churn'])
     plt.title('Tuned Random Forest Confusion Matrix')
     plt.ylabel('Actual')
     plt.xlabel('Predicted')

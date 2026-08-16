@@ -1,10 +1,10 @@
 """
 Random Forest Classifier Pipeline
-Project 5: Random Forest Classifier
+Project 5: Customer Churn Classification
 
 This script performs:
 1. Data loading and initial exploration.
-2. Stratified train-test split (leakage prevention).
+2. Training and testing set preparation using the provided splits.
 3. Preprocessing (Imputation & scaling for numericals, encoding for categoricals).
 4. Baseline Random Forest model training and evaluation.
 5. Hyperparameter tuning using GridSearchCV with 5-fold cross-validation.
@@ -13,6 +13,7 @@ This script performs:
 """
 
 import os
+import json
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -20,9 +21,11 @@ import seaborn as sns
 
 # Define paths relative to project root
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
 PLOTS_DIR = os.path.join(BASE_DIR, "plots")
-from sklearn.datasets import fetch_openml
-from sklearn.model_selection import train_test_split, GridSearchCV
+MODELS_DIR = os.path.join(BASE_DIR, "models")
+
+from sklearn.model_selection import GridSearchCV
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
@@ -34,73 +37,62 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 sns.set_theme(style="whitegrid")
 plt.rcParams["figure.figsize"] = (10, 6)
 
-
 def load_data():
     """
-    Load the Titanic dataset from OpenML, with fallbacks to GitHub CSV 
-    and synthetic generation if internet connection is down.
+    Load the training and testing customer churn datasets from CSV files.
     """
     print("--- 1. Loading Dataset ---")
+    train_path = os.path.join(DATA_DIR, "churn-bigml-80.csv")
+    test_path = os.path.join(DATA_DIR, "churn-bigml-20.csv")
+    
     try:
-        print("Attempting to load Titanic dataset from OpenML...")
-        titanic = fetch_openml('titanic', version=1, as_frame=True, parser='auto')
-        df = titanic.frame
-        print("Dataset loaded successfully from OpenML!")
-        return df
+        train_df = pd.read_csv(train_path)
+        test_df = pd.read_csv(test_path)
+        print("Train and Test datasets loaded successfully from local CSVs!")
+        return train_df, test_df
     except Exception as e:
-        print(f"OpenML load failed: {e}")
-        print("Falling back to downloading from public GitHub CSV...")
-        try:
-            url = "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
-            df = pd.read_csv(url)
-            df.columns = df.columns.str.lower()
-            print("Dataset loaded successfully from GitHub!")
-            return df
-        except Exception as e_github:
-            print(f"GitHub fallback failed: {e_github}")
-            print("Generating synthetic classification dataset as a final fallback...")
-            from sklearn.datasets import make_classification
-            X, y = make_classification(n_samples=1000, n_features=7, n_informative=5, n_classes=2, random_state=42)
-            df = pd.DataFrame(X, columns=['pclass', 'sex', 'age', 'sibsp', 'parch', 'fare', 'embarked'])
-            df['pclass'] = pd.qcut(df['pclass'], 3, labels=[1, 2, 3]).astype(int)
-            df['sex'] = np.where(df['sex'] > 0, 'female', 'male')
-            df['embarked'] = pd.qcut(df['embarked'], 3, labels=['S', 'C', 'Q']).astype(str)
-            df['age'] = np.abs(df['age'] * 20 + 20).round(1)
-            df['fare'] = np.abs(df['fare'] * 50 + 10).round(2)
-            df['sibsp'] = np.clip(np.abs(df['sibsp']).astype(int), 0, 8)
-            df['parch'] = np.clip(np.abs(df['parch']).astype(int), 0, 6)
-            df['survived'] = y
-            print("Synthetic dataset generated successfully!")
-            return df
-
+        print(f"Failed to load datasets: {e}")
+        raise e
 
 def main():
     # 1. Load Data
-    df = load_data()
-    if 'survived' in df.columns:
-        df['survived'] = df['survived'].astype(int)
-
-    print(f"\nDataset shape: {df.shape}")
-    print("\nMissing values:")
-    print(df.isnull().sum())
-
-    # 2. Select Features and Target
-    selected_features = ['pclass', 'sex', 'age', 'sibsp', 'parch', 'fare', 'embarked']
-    available_features = [col for col in selected_features if col in df.columns]
+    train_df, test_df = load_data()
     
-    X = df[available_features]
-    y = df['survived']
+    print(f"\nTrain shape: {train_df.shape}")
+    print(f"Test shape: {test_df.shape}")
+    
+    # 2. Select Features and Target
+    num_cols = [
+        'Account length', 'Number vmail messages', 'Total day minutes', 'Total day calls',
+        'Total day charge', 'Total eve minutes', 'Total eve calls', 'Total eve charge',
+        'Total night minutes', 'Total night calls', 'Total night charge', 'Total intl minutes',
+        'Total intl calls', 'Total intl charge', 'Customer service calls'
+    ]
+    cat_cols = ['State', 'Area code', 'International plan', 'Voice mail plan']
+    selected_features = num_cols + cat_cols
+    target = 'Churn'
 
-    # 3. Train-Test Split (Prevent leakage: split before pipeline fitting)
-    print("\n--- 2. Train-Test Split ---")
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-    print(f"Train set shape: {X_train.shape}")
-    print(f"Test set shape: {X_test.shape}")
+    # Check if target is present
+    if target not in train_df.columns:
+        raise ValueError(f"Target column '{target}' not found in training dataset.")
 
-    # 4. Preprocessing Pipeline
-    num_cols = [col for col in ['age', 'fare', 'sibsp', 'parch'] if col in X_train.columns]
-    cat_cols = [col for col in ['sex', 'embarked', 'pclass'] if col in X_train.columns]
+    # Process splits
+    X_train = train_df[selected_features].copy()
+    y_train = train_df[target].astype(int)
+    X_test = test_df[selected_features].copy()
+    y_test = test_df[target].astype(int)
 
+    # Convert Area code to string
+    X_train['Area code'] = X_train['Area code'].astype(str)
+    X_test['Area code'] = X_test['Area code'].astype(str)
+
+    print("\n--- 2. Dataset Information ---")
+    print(f"Training features shape: {X_train.shape}")
+    print(f"Testing features shape: {X_test.shape}")
+    print("\nMissing values in training:")
+    print(X_train.isnull().sum())
+
+    # 3. Preprocessing Pipeline
     num_transformer = Pipeline(steps=[
         ('imputer', SimpleImputer(strategy='median')),
         ('scaler', StandardScaler())
@@ -127,8 +119,9 @@ def main():
     cat_encoder = preprocessor.named_transformers_['cat'].named_steps['onehot']
     cat_feature_names = cat_encoder.get_feature_names_out(cat_cols).tolist()
     feature_names = num_feature_names + cat_feature_names
+    print(f"Total features after preprocessing: {len(feature_names)}")
 
-    # 5. Train Baseline Model
+    # 4. Train Baseline Model
     print("\n--- 4. Training Baseline Model ---")
     baseline_rf = RandomForestClassifier(random_state=42)
     baseline_rf.fit(X_train_preprocessed, y_train)
@@ -149,8 +142,8 @@ def main():
     cm_baseline = confusion_matrix(y_test, y_pred_baseline)
     plt.figure(figsize=(6, 5))
     sns.heatmap(cm_baseline, annot=True, fmt='d', cmap='Blues', cbar=False,
-                xticklabels=['Not Survived', 'Survived'],
-                yticklabels=['Not Survived', 'Survived'])
+                xticklabels=['Non-Churn', 'Churn'],
+                yticklabels=['Non-Churn', 'Churn'])
     plt.title('Baseline Random Forest Confusion Matrix')
     plt.ylabel('Actual')
     plt.xlabel('Predicted')
@@ -159,7 +152,7 @@ def main():
     plt.savefig(os.path.join(PLOTS_DIR, 'baseline_confusion_matrix.png'), dpi=300)
     plt.close()
 
-    # 6. Hyperparameter Tuning using Cross-Validation
+    # 5. Hyperparameter Tuning using Cross-Validation
     print("\n--- 5. Hyperparameter Tuning (Grid Search with 5-fold CV) ---")
     param_grid = {
         'n_estimators': [50, 100, 200],
@@ -184,7 +177,7 @@ def main():
         print(f" - {param}: {val}")
     print(f"Best CV F1-Score: {grid_search.best_score_:.4f}")
 
-    # 7. Evaluate Tuned Model
+    # 6. Evaluate Tuned Model
     print("\n--- 6. Evaluating Tuned Model ---")
     tuned_rf = grid_search.best_estimator_
     y_pred_tuned = tuned_rf.predict(X_test_preprocessed)
@@ -207,17 +200,16 @@ def main():
     cm_tuned = confusion_matrix(y_test, y_pred_tuned)
     plt.figure(figsize=(6, 5))
     sns.heatmap(cm_tuned, annot=True, fmt='d', cmap='Greens', cbar=False,
-                xticklabels=['Not Survived', 'Survived'],
-                yticklabels=['Not Survived', 'Survived'])
+                xticklabels=['Non-Churn', 'Churn'],
+                yticklabels=['Non-Churn', 'Churn'])
     plt.title('Tuned Random Forest Confusion Matrix')
     plt.ylabel('Actual')
     plt.xlabel('Predicted')
     plt.tight_layout()
-    os.makedirs(PLOTS_DIR, exist_ok=True)
     plt.savefig(os.path.join(PLOTS_DIR, 'tuned_confusion_matrix.png'), dpi=300)
     plt.close()
 
-    # 8. Compare Models
+    # 7. Compare Models
     print("\n--- 7. Comparing Baseline vs. Tuned ---")
     comparison_df = pd.DataFrame({
         'Metric': list(baseline_metrics.keys()),
@@ -244,11 +236,10 @@ def main():
                         fontweight='semibold')
     plt.ylabel('Score')
     plt.tight_layout()
-    os.makedirs(PLOTS_DIR, exist_ok=True)
     plt.savefig(os.path.join(PLOTS_DIR, 'model_comparison.png'), dpi=300)
     plt.close()
 
-    # 9. Feature Importance Analysis
+    # 8. Feature Importance Analysis
     print("\n--- 8. Feature Importance Analysis ---")
     importances = tuned_rf.feature_importances_
     feat_importance_df = pd.DataFrame({
@@ -256,20 +247,18 @@ def main():
         'Importance': importances
     }).sort_values(by='Importance', ascending=False)
 
-    print(feat_importance_df.to_string(index=False))
+    print(feat_importance_df.head(15).to_string(index=False))
 
-    # Save feature importance plot
-    plt.figure(figsize=(10, 6))
-    sns.barplot(data=feat_importance_df, x='Importance', y='Feature', palette='viridis', hue='Feature', legend=False)
-    plt.title('Feature Importance Analysis (Tuned Random Forest)')
+    # Save feature importance plot (top 15 features for clarity due to state one-hot encoding cardinality)
+    plt.figure(figsize=(10, 8))
+    sns.barplot(data=feat_importance_df.head(15), x='Importance', y='Feature', palette='viridis', hue='Feature', legend=False)
+    plt.title('Top 15 Feature Importance Analysis (Tuned Random Forest)')
     plt.xlabel('Importance Score')
     plt.ylabel('Feature')
     plt.tight_layout()
-    os.makedirs(PLOTS_DIR, exist_ok=True)
     plt.savefig(os.path.join(PLOTS_DIR, 'feature_importances.png'), dpi=300)
     plt.close()
     print("\nAll plots have been saved to the workspace.")
-
 
 if __name__ == '__main__':
     main()
